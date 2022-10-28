@@ -16,6 +16,7 @@ from gpx_converter import Converter
 import codecs
 import subprocess
 import pandas as pd
+from pymongo import MongoClient
 #dummy_geo_lat = 5555.55
 #dummy_geo_long = 9999.99
 # path to single video input, need to put this in loop if multiple videos are to be read automatically
@@ -34,10 +35,16 @@ timestamps_gps=[]
 latlong=[]
 pothole_info = []
 pothole_bounding_box = []
+pothole_countlist = []
 #pothole_perimeter = []
 #class_list = []
 # class_list = []
 # bounding_boxes_list = []
+mongo_client_path ="mongodb+srv://amani:SsWRiZBW9qA7E5pM@cluster0.ygyyhu3.mongodb.net"
+mongo = None
+
+count = 0
+
 
 base_augmentation = Compose(
     [
@@ -51,12 +58,13 @@ base_augmentation = Compose(
 
 
 async def detect_pothole(image, det_model):
+    global count
     '''
     ADD DETECTRON (POTHOLE, MANHOLE, CRACK DETECTION) CODE HERE. NO NEED TO DO BATCHING AT THIS POINT.
     '''
     await asyncio.sleep(0.001)
-    count = 0
     class_list = []
+    potho_count = 0
     color = (255, 0, 0)
     thickness = 2
     bounding_boxes_list = []
@@ -66,14 +74,19 @@ async def detect_pothole(image, det_model):
     res = det_model(image_batch)[0]["instances"].get_fields()
     box_res = res["pred_boxes"]
     class_list = res["pred_classes"].numpy().tolist()
+    print(len(class_list),"line 75")
     for index, c in enumerate(class_list):
+        print(c,"line 76")
         if c >= 1:
             bounding_boxes_list.append(box_res.tensor[index, :].detach().numpy().tolist())
             image_1 = cv2.rectangle(image_1, (int(box_res.tensor[index, :].detach().numpy().tolist()[0]) , int(box_res.tensor[index, :].detach().numpy().tolist()[1])),(int(box_res.tensor[index, :].detach().numpy().tolist()[2]) ,int(box_res.tensor[index, :].detach().numpy().tolist()[3])), color, thickness)
             cv2.imwrite("./output/save_image"+str(count)+".jpg",image_1)
+            print(c , "line 81 image printed")
             count += 1
+        if c == 2:
+            potho_count += 1
     print(len(bounding_boxes_list),"line 64 pipelin ")
-    return bounding_boxes_list  
+    return bounding_boxes_list , potho_count 
 
 
 async def detect_road(image,cls_model):
@@ -89,43 +102,53 @@ async def detect_road(image,cls_model):
     return isRoad
 
 
-async def count_frames_manual(video):
+async def count_frames_manual(video, total_frame_count):
     # initialize the total number of frames read
-    total = 0
     frames = []
-    # loop over the frames of the video
-    while True:
-        (ret, frame) = video.read()
-        timestamps_video.append(video.get(cv2.CAP_PROP_POS_MSEC))
-        latlong.append([np.random.randint(-180,180),np.random.randint(0,360)])
-        if not ret:
-            break
-        total += 1
-        frames.append(frame)
-    return len(frames), frames
+    currentframe = 0
+    while(True):
+        print(currentframe)
+        if currentframe%90==0:  
+            # reading from frame
+            ret,frame = video.read()
+            # ret = True
+            if ret is False:
+                # print(frame)
+                continue
+            elif currentframe >= total_frame_count:
+                print("End of video reached")
+                break
+            else:
+                frames.append(frame)
+        currentframe += 1
+    return frames
 
 
 async def main():
     cls_model =  await make_cls_model()
     det_model =  make_det_model(0.7)
-    desc = await get_database()
-    tuple_length = len(desc)
-    if tuple_length == 2:
-        camera_type = desc[0]
-        file_path = desc[1]
-    else:
-        camera_type = desc[0]
-        file_path = desc[1]
-        file_path_gpx =desc[2]
-    print(camera_type, file_path, "mongo db")
-    # camera_type = "gopro"
-    # file_path = "./GH052755.MP4"
+    mongo = MongoClient(mongo_client_path)
+    db = mongo["potholes_detection"]
+    col = db["map_data"]
+    # desc = await get_database()
+    # tuple_length = len(desc)
+    # if tuple_length == 2:
+    #     camera_type = desc[0]
+    #     file_path = desc[1]
+    # else:
+    #     camera_type = desc[0]
+    #     file_path = desc[1]
+    #     file_path_gpx =desc[2]
+    # print(camera_type, file_path, "mongo db")
+    camera_type = "gopro"
+    file_path = "./GH052755.MP4"
     if camera_type == "ddpai_x2pro":
         print("i am ddpai_x2pro")
         timestamp_list,latitude_list,longitude_list = await ddpaiinfo(file_path=file_path_gpx)
         video = cv2.VideoCapture(file_path)
         fps = video.get(cv2.CAP_PROP_FPS)
-        total_frame_count, frames = await count_frames_manual(video)
+        total_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        frames = await count_frames_manual(video, total_frame_count=total_frame_count)
         count = 0 
         for item in frames:
             isRoad.append(await detect_road(item, cls_model=cls_model))
@@ -136,30 +159,34 @@ async def main():
                 pothole_size.append([])
                 print('No road detected')
             count += 1
-            if count > 10 :
-                break
-            
+
     elif camera_type == "gopro":
         print("i am goprob")
         timestamp_list,latitude_list,longitude_list= await goprogenerate(file_path=file_path)
         video = cv2.VideoCapture(file_path)
         fps = video.get(cv2.CAP_PROP_FPS)
-        total_frame_count, frames = await count_frames_manual(video)
+        total_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        frames = await count_frames_manual(video, total_frame_count=total_frame_count)
         count = 0 
         for item in frames:
             isRoad.append(await detect_road(item, cls_model=cls_model))
             if isRoad[-1] == 1:
                 print("road detected")
-                pothole_bounding_box.append(await detect_pothole(item,det_model=det_model))
+                x , y = await detect_pothole(item,det_model=det_model)
+                pothole_bounding_box.append(x)
+                pothole_countlist.append(y)
             else:
                 pothole_size.append([])
                 print('No road detected')
             count += 1
-            if count > 10 :
-                break
 
     batch_bbox_with_ids = await make_unique_ids(pothole_bounding_box)
+    batch_size = int(total_frame_count // fps)
+    print(batch_size,"line170" , total_frame_count,fps)
+    print(pothole_countlist, "line 181")
     final_json_object = await prepare_frame_data(frames, batch_bbox_with_ids,timestamp_list=timestamp_list[-1],longitude_list=longitude_list[-1],latitude_list=latitude_list[-1])
+    video_json_object = {"video_id": path.split("/")[-1].split(".")[0], "results": final_json_object}
+    col.insert_one(video_json_object)
     print(final_json_object)
 
     '''
