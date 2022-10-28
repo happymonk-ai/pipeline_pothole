@@ -55,18 +55,25 @@ async def detect_pothole(image, det_model):
     ADD DETECTRON (POTHOLE, MANHOLE, CRACK DETECTION) CODE HERE. NO NEED TO DO BATCHING AT THIS POINT.
     '''
     await asyncio.sleep(0.001)
+    count = 0
     class_list = []
+    color = (255, 0, 0)
+    thickness = 2
     bounding_boxes_list = []
+    image_1 = image
     image = torch.tensor(image).permute(2, 0, 1)
     image_batch = [{"image": image}]
     res = det_model(image_batch)[0]["instances"].get_fields()
     box_res = res["pred_boxes"]
     class_list = res["pred_classes"].numpy().tolist()
     for index, c in enumerate(class_list):
-        if c == 1:
+        if c >= 1:
             bounding_boxes_list.append(box_res.tensor[index, :].detach().numpy().tolist())
+            image_1 = cv2.rectangle(image_1, (int(box_res.tensor[index, :].detach().numpy().tolist()[0]) , int(box_res.tensor[index, :].detach().numpy().tolist()[1])),(int(box_res.tensor[index, :].detach().numpy().tolist()[2]) ,int(box_res.tensor[index, :].detach().numpy().tolist()[3])), color, thickness)
+            cv2.imwrite("./output/save_image"+str(count)+".jpg",image_1)
+            count += 1
     print(len(bounding_boxes_list),"line 64 pipelin ")
-    return bounding_boxes_list  # size = 0 if no pothole, else actual sizes based on bounding boxes
+    return bounding_boxes_list  
 
 
 async def detect_road(image,cls_model):
@@ -111,6 +118,8 @@ async def main():
         file_path = desc[1]
         file_path_gpx =desc[2]
     print(camera_type, file_path, "mongo db")
+    # camera_type = "gopro"
+    # file_path = "./GH052755.MP4"
     if camera_type == "ddpai_x2pro":
         print("i am ddpai_x2pro")
         timestamp_list,latitude_list,longitude_list = await ddpaiinfo(file_path=file_path_gpx)
@@ -133,7 +142,6 @@ async def main():
     elif camera_type == "gopro":
         print("i am goprob")
         timestamp_list,latitude_list,longitude_list= await goprogenerate(file_path=file_path)
-        # print(timestamp_list,latitude_list,longitude_list,"line 111")
         video = cv2.VideoCapture(file_path)
         fps = video.get(cv2.CAP_PROP_FPS)
         total_frame_count, frames = await count_frames_manual(video)
