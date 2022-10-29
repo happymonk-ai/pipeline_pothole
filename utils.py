@@ -98,12 +98,12 @@ class AModel(torch.nn.Module):
 
 
 def make_det_model(THRESH):
-    cfg_save_path = "./weights/OD_cfg.pkl"
+    cfg_save_path = "./weights/OD_cfg_1.pkl"
     with open(cfg_save_path, "rb") as f:
         cfg = pickle.load(f)
         # path of the pretrained weight
         cfg.MODEL.WEIGHTS = os.path.join(
-            cfg.OUTPUT_DIR, "./weights/model_final.pth")
+            cfg.OUTPUT_DIR, "./weights/model_final_1.pth")
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = THRESH
         # define the model
         model = build_model(cfg)
