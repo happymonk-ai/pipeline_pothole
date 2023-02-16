@@ -80,7 +80,7 @@ tqdm==4.64.1
 typing_extensions==4.3.0
 urllib3==1.26.11
 wandb==0.13.4
-Werkzeug==2.2.2
+Werkzeug==2.2.3
 yacs==0.1.8
 zipp==3.9.0
 gpx-converter 
